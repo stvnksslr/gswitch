@@ -1,0 +1,26 @@
+[package]
+name = "gswitch"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "gsw"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+dirs = "5.0"
+anyhow = "1.0"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 3
+
+[profile.dev]
+codegen-units = 1
+
+[profile.test]
+codegen-units = 1
