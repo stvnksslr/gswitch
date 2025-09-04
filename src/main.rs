@@ -2,6 +2,9 @@ mod config;
 mod git;
 mod dotfile;
 
+#[cfg(test)]
+mod test_utils;
+
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 use config::{Config, GitProfile};

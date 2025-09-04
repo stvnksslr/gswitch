@@ -102,7 +102,10 @@ echo 'gsw activate nushell | source' >> ~/.config/nushell/config.nu
 
 Display the active git profile in your [Starship](https://starship.rs/) prompt by adding this to your `~/.config/starship.toml`:
 
-### Fast option (recommended)
+### Profile Display
+```bash
+☸ <orbstack> gswitch on  main [!?] is 📦 v0.1.0 via 🦀 v1.89.0  personal
+```
 
 ```toml
 [custom.gsw]
@@ -114,6 +117,9 @@ description = "Show project git profile"
 ```
 
 ### Alternative: Show current git identity name
+```bash
+☸ <orbstack> gswitch on  main [!?] is 📦 v0.1.0 via 🦀 v1.89.0  steven kessler
+```
 
 ```toml
 [custom.gsw]
@@ -122,16 +128,23 @@ detect_files = [".gswitch"]
 format = "[$output]($style)"
 style = "bold blue"
 description = "Show active git identity"
+```
 
+```sh
+☸ <orbstack> gswitch on  main [!?] is 📦 v0.1.0 via 🦀 v1.89.0  youremail@email.com
+```
+
+```
+[custom.gsw]
+command = "gsw current --format=email 2>/dev/null || echo ''"
+detect_files = [".gswitch"]
+format = "[$output]($style)"
+style = "bold blue"
+description = "Show active git identity"
+```
 
 This will append the git profile to the end of your prompt: `gswitch on master personal` when you're in a git repository with a `.gswitch` file.
 
-## How It Works
-
-1. **Directory Walking**: When you run `gsw auto`, it searches from your current directory up to the git repository root for a `.gswitch` file
-2. **Repository Boundaries**: The search is constrained to the current git repository - it won't traverse outside
-3. **Local Application**: Found profiles are applied locally to the current repository using `git config --local`
-4. **Shell Integration**: The shell hooks automatically run `gsw auto` when you change directories
 
 ## Configuration
 
@@ -143,7 +156,7 @@ This will append the git profile to the end of your prompt: `gswitch on master p
 
 ```bash
 # Set up work profile
-gsw add work --user-name "Jane Smith" --email "jane@company.com" --signing-key "ABC123"
+gsw add work --user-name "Jane Smith" --email "jane@company.com" 
 
 # Set up personal profile  
 gsw add personal --user-name "Jane Smith" --email "jane@gmail.com"
