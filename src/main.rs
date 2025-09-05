@@ -184,9 +184,7 @@ fn main() -> Result<()> {
 
             if let Some(profile_name) = dotfile::get_dotfile_profile() {
                 if let Some(profile) = config.get_profile(&profile_name) {
-                    // Always apply locally since we're guaranteed to be in a git repo
                     git::set_git_config(profile, false)?;
-                    println!("Auto-switched to profile '{}' locally", profile_name);
                 } else {
                     println!("Profile '{}' specified in .gswitch file not found", profile_name);
                 }
