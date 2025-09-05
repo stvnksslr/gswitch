@@ -177,20 +177,31 @@ fn main() -> Result<()> {
         }
 
         Commands::Auto => {
+            // Early exit: Check for .gswitch file first (fastest check)
+            let Some(profile_name) = dotfile::get_dotfile_profile() else {
+                return Ok(()); // Silent exit when no .gswitch file - this is normal
+            };
+
+            // Early exit: Only proceed if in git repo
             if !git::is_git_repo() {
-                println!("Auto-switching only works within git repositories");
-                return Ok(());
+                return Ok(()); // Silent exit when not in git repo
             }
 
-            if let Some(profile_name) = dotfile::get_dotfile_profile() {
-                if let Some(profile) = config.get_profile(&profile_name) {
-                    git::set_git_config(profile, false)?;
-                } else {
-                    println!("Profile '{}' specified in .gswitch file not found", profile_name);
+            // Check if we have the profile in config
+            let Some(profile) = config.get_profile(&profile_name) else {
+                eprintln!("Profile '{}' specified in .gswitch file not found", profile_name);
+                return Ok(());
+            };
+
+            // Check if we're already using the correct profile locally
+            if let Ok(current_profile) = git::get_current_git_config() {
+                if current_profile.email == profile.email && current_profile.name == profile.name {
+                    return Ok(()); // Already using correct profile, no need to switch
                 }
-            } else {
-                println!("No .gswitch file found in current git repository");
             }
+
+            // Only set git config if we actually need to change it
+            git::set_git_config(profile, false)?;
         }
 
         Commands::Init { profile } => {

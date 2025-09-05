@@ -93,7 +93,7 @@ pub fn is_git_repo() -> bool {
 
 pub fn is_git_repo_in_dir<P: AsRef<Path>>(dir: Option<P>) -> bool {
     let mut cmd = Command::new("git");
-    cmd.args(["rev-parse", "--git-dir"]);
+    cmd.args(["rev-parse", "--show-toplevel"]);
     if let Some(d) = dir {
         cmd.current_dir(d);
     }
@@ -101,7 +101,6 @@ pub fn is_git_repo_in_dir<P: AsRef<Path>>(dir: Option<P>) -> bool {
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
-
 
 pub fn find_git_root_in_dir<P: AsRef<Path>>(dir: Option<P>) -> Result<std::path::PathBuf> {
     let mut cmd = Command::new("git");
@@ -122,6 +121,21 @@ pub fn find_git_root_in_dir<P: AsRef<Path>>(dir: Option<P>) -> Result<std::path:
         .to_string();
     
     Ok(std::path::PathBuf::from(root_path))
+}
+
+/// Combined function to check if in git repo and get root - more efficient than separate calls
+pub fn get_git_repo_info<P: AsRef<Path>>(dir: Option<P>) -> Option<std::path::PathBuf> {
+    let mut cmd = Command::new("git");
+    cmd.args(["rev-parse", "--show-toplevel"]);
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    
+    cmd.output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|root| std::path::PathBuf::from(root.trim()))
 }
 
 #[cfg(test)]

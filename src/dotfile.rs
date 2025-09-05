@@ -12,12 +12,17 @@ pub fn find_dotfile_in_dir<P: AsRef<Path>>(start_dir: Option<P>) -> Option<PathB
         std::env::current_dir().ok()?
     };
     
-    // Only search for dotfiles if we're in a git repository
-    if !git::is_git_repo_in_dir(Some(&current_dir)) {
-        return None;
+    // Early exit: Check if .gswitch exists in current directory first (most common case)
+    let dotfile_path = current_dir.join(DOTFILE_NAME);
+    if dotfile_path.exists() {
+        // Still need to verify we're in a git repo for the file to be valid
+        if git::get_git_repo_info(Some(&current_dir)).is_some() {
+            return Some(dotfile_path);
+        }
     }
     
-    let git_root = git::find_git_root_in_dir(Some(&current_dir)).ok()?;
+    // Combined git check and root finding in one call
+    let git_root = git::get_git_repo_info(Some(&current_dir))?;
     let mut search_dir = current_dir;
     
     // Only search within the git repository boundaries
