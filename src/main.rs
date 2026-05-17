@@ -1,12 +1,12 @@
 mod config;
-mod git;
 mod dotfile;
+mod git;
 
 #[cfg(test)]
 mod test_utils;
 
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use anyhow::Result;
 use config::{Config, GitProfile};
 
 #[derive(Parser)]
@@ -32,6 +32,9 @@ enum Commands {
         /// Git signing key (optional)
         #[arg(long)]
         signing_key: Option<String>,
+        /// Signing key format: gpg, ssh, or x509 (optional)
+        #[arg(long)]
+        gpg_format: Option<String>,
     },
     /// List all profiles
     List,
@@ -82,13 +85,20 @@ fn main() -> Result<()> {
     let mut config = Config::load()?;
 
     match cli.command {
-        Commands::Add { name, user_name, email, signing_key } => {
+        Commands::Add {
+            name,
+            user_name,
+            email,
+            signing_key,
+            gpg_format,
+        } => {
             let profile = GitProfile {
                 name: user_name,
                 email,
                 signing_key,
+                gpg_format,
             };
-            config.add_profile(name.clone(), profile);
+            config.add_profile(name.clone(), profile)?;
             config.save()?;
             println!("Profile '{}' added successfully", name);
         }
@@ -106,9 +116,15 @@ fn main() -> Result<()> {
                 } else {
                     ""
                 };
-                println!("  {} - {} <{}>{}", name, profile.name, profile.email, current);
+                println!(
+                    "  {} - {} <{}>{}",
+                    name, profile.name, profile.email, current
+                );
                 if let Some(key) = &profile.signing_key {
                     println!("    Signing key: {}", key);
+                }
+                if let Some(format) = &profile.gpg_format {
+                    println!("    Signing format: {}", format);
                 }
             }
         }
@@ -118,60 +134,55 @@ fn main() -> Result<()> {
                 config.save()?;
                 println!("Profile '{}' removed successfully", name);
             } else {
-                println!("Profile '{}' not found", name);
+                bail!("Profile '{}' not found", name);
             }
         }
 
         Commands::Switch { name } => {
             if let Some(profile) = config.get_profile(&name) {
                 git::set_git_config(profile, true)?;
-                config.set_current_profile(name.clone());
-                config.save()?;
                 println!("Switched to profile '{}' globally", name);
+                config.set_current_profile(name);
+                config.save()?;
             } else {
-                println!("Profile '{}' not found", name);
+                bail!("Profile '{}' not found", name);
             }
         }
 
         Commands::Local { name } => {
             if !git::is_git_repo() {
-                println!("Not in a git repository");
-                return Ok(());
+                bail!("Not in a git repository");
             }
 
             if let Some(profile) = config.get_profile(&name) {
                 git::set_git_config(profile, false)?;
                 println!("Switched to profile '{}' locally", name);
             } else {
-                println!("Profile '{}' not found", name);
+                bail!("Profile '{}' not found", name);
             }
         }
 
         Commands::Current { format } => {
-            match git::get_current_git_config() {
-                Ok(profile) => {
-                    match format.as_str() {
-                        "name" => println!("{}", profile.name),
-                        "email" => println!("{}", profile.email),
-                        "full" => {
-                            println!("Current git configuration:");
-                            println!("  Name: {}", profile.name);
-                            println!("  Email: {}", profile.email);
-                            if let Some(key) = profile.signing_key {
-                                println!("  Signing key: {}", key);
-                            }
-                        }
-                        _ => {
-                            println!("Invalid format: {}. Valid formats: full, name, email", format);
-                            return Ok(());
-                        }
+            let profile = git::get_current_git_config()?;
+            match format.as_str() {
+                "name" => println!("{}", profile.name),
+                "email" => println!("{}", profile.email),
+                "full" => {
+                    println!("Current git configuration:");
+                    println!("  Name: {}", profile.name);
+                    println!("  Email: {}", profile.email);
+                    if let Some(key) = profile.signing_key {
+                        println!("  Signing key: {}", key);
+                    }
+                    if let Some(format) = profile.gpg_format {
+                        println!("  Signing format: {}", format);
                     }
                 }
-                Err(e) => {
-                    if format.as_str() == "full" {
-                        println!("Failed to get current git configuration: {}", e);
-                    }
-                    // Silent for name/email format when there's an error
+                _ => {
+                    bail!(
+                        "Invalid format: '{}'. Valid formats: full, name, email",
+                        format
+                    );
                 }
             }
         }
@@ -189,15 +200,18 @@ fn main() -> Result<()> {
 
             // Check if we have the profile in config
             let Some(profile) = config.get_profile(&profile_name) else {
-                eprintln!("Profile '{}' specified in .gswitch file not found", profile_name);
-                return Ok(());
+                bail!(
+                    "Profile '{}' specified in .gswitch file not found",
+                    profile_name
+                );
             };
 
             // Check if we're already using the correct profile locally
-            if let Ok(current_profile) = git::get_current_git_config() {
-                if current_profile.email == profile.email && current_profile.name == profile.name {
-                    return Ok(()); // Already using correct profile, no need to switch
-                }
+            if let Ok(current_profile) = git::get_current_git_config()
+                && current_profile.email == profile.email
+                && current_profile.name == profile.name
+            {
+                return Ok(()); // Already using correct profile, no need to switch
             }
 
             // Only set git config if we actually need to change it
@@ -206,11 +220,19 @@ fn main() -> Result<()> {
 
         Commands::Init { profile } => {
             if config.get_profile(&profile).is_none() {
-                println!("Profile '{}' not found. Available profiles:", profile);
-                for name in config.profiles.keys() {
-                    println!("  {}", name);
+                let available: Vec<&str> = config.profiles.keys().map(|s| s.as_str()).collect();
+                if available.is_empty() {
+                    bail!(
+                        "Profile '{}' not found. No profiles configured. Use 'gsw add' to create one.",
+                        profile
+                    );
+                } else {
+                    bail!(
+                        "Profile '{}' not found. Available profiles: {}",
+                        profile,
+                        available.join(", ")
+                    );
                 }
-                return Ok(());
             }
 
             dotfile::create_dotfile(".gswitch", &profile)?;
@@ -218,32 +240,32 @@ fn main() -> Result<()> {
         }
 
         Commands::Import { name } => {
-            match git::get_current_git_config() {
-                Ok(profile) => {
-                    if config.profiles.contains_key(&name) {
-                        println!("Profile '{}' already exists. Use a different name or remove the existing profile first.", name);
-                        return Ok(());
-                    }
+            if config.profiles.contains_key(&name) {
+                bail!(
+                    "Profile '{}' already exists. Use a different name or remove the existing profile first.",
+                    name
+                );
+            }
 
-                    config.add_profile(name.clone(), profile.clone());
-                    config.save()?;
-                    println!("Imported current git identity as profile '{}':", name);
-                    println!("  Name: {}", profile.name);
-                    println!("  Email: {}", profile.email);
-                    if let Some(key) = profile.signing_key {
-                        println!("  Signing key: {}", key);
-                    }
-                }
-                Err(e) => {
-                    println!("Failed to import current git configuration: {}", e);
-                    println!("Make sure you have git configured with at least user.name and user.email");
-                }
+            let profile = git::get_current_git_config()
+                .map_err(|e| anyhow::anyhow!("Failed to import current git configuration: {}. Make sure you have git configured with at least user.name and user.email", e))?;
+
+            config.add_profile(name.clone(), profile.clone())?;
+            config.save()?;
+            println!("Imported current git identity as profile '{}':", name);
+            println!("  Name: {}", profile.name);
+            println!("  Email: {}", profile.email);
+            if let Some(ref key) = profile.signing_key {
+                println!("  Signing key: {}", key);
+            }
+            if let Some(ref format) = profile.gpg_format {
+                println!("  Signing format: {}", format);
             }
         }
 
         Commands::Activate { shell } => {
             let script = match shell.as_str() {
-                "bash" | "zsh" => {
+                "bash" => {
                     r#"_gsw_auto_switch() {
     if command -v gsw >/dev/null 2>&1; then
         gsw auto 2>/dev/null
@@ -251,16 +273,28 @@ fn main() -> Result<()> {
 }
 
 case "$-" in
-    *i*) 
-        if [[ "${shell}" == "zsh" ]]; then
-            autoload -U add-zsh-hook
-            add-zsh-hook chpwd _gsw_auto_switch
-        else
-            _gsw_original_cd=$(declare -f cd)
-            cd() {
-                builtin cd "$@" && _gsw_auto_switch
-            }
-        fi
+    *i*)
+        cd() {
+            builtin cd "$@"
+            local _gsw_rc=$?
+            _gsw_auto_switch
+            return $_gsw_rc
+        }
+        _gsw_auto_switch
+        ;;
+esac"#
+                }
+                "zsh" => {
+                    r#"_gsw_auto_switch() {
+    if command -v gsw >/dev/null 2>&1; then
+        gsw auto 2>/dev/null
+    fi
+}
+
+case "$-" in
+    *i*)
+        autoload -U add-zsh-hook
+        add-zsh-hook chpwd _gsw_auto_switch
         _gsw_auto_switch
         ;;
 esac"#
@@ -289,30 +323,32 @@ $env.config = ($env.config | upsert hooks {
 _gsw_auto_switch"#
                 }
                 _ => {
-                    println!("Unsupported shell: {}. Supported shells: bash, zsh, fish, nushell", shell);
-                    return Ok(());
+                    bail!(
+                        "Unsupported shell: '{}'. Supported shells: bash, zsh, fish, nushell",
+                        shell
+                    );
                 }
             };
-            
+
             println!("{}", script);
         }
 
         Commands::Prompt => {
-            // Fast path: only check current directory for .gswitch file
-            // Use absolute path to ensure we're checking exactly the current directory
-            let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            let gswitch_path = current_dir.join(".gswitch");
-            
-            if gswitch_path.exists()
-                && let Ok(content) = std::fs::read_to_string(&gswitch_path) {
-                    let profile_name = content.trim();
-                    if !profile_name.is_empty() && !profile_name.chars().all(|c| c.is_whitespace()) {
-                        print!(" {}", profile_name);
-                        std::process::exit(0);
-                    }
+            // Fast path for shell prompts: only check current directory for .gswitch file
+            // Exit code 1 (no output) signals to Starship not to display anything
+            let gswitch_path = std::env::current_dir()
+                .map(|d| d.join(".gswitch"))
+                .unwrap_or_else(|_| std::path::PathBuf::from(".gswitch"));
+
+            if let Ok(content) = std::fs::read_to_string(&gswitch_path) {
+                let profile_name = content.trim();
+                if !profile_name.is_empty() {
+                    print!(" {}", profile_name);
+                    return Ok(());
                 }
+            }
             // Exit with error code if no valid profile found
-            // This tells Starship not to display anything
+            // This tells Starship not to display anything (silent, no error message)
             std::process::exit(1);
         }
     }
