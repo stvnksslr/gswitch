@@ -345,21 +345,15 @@ _gsw_auto_switch"#
         }
 
         Commands::Prompt => {
-            // Fast path for shell prompts: only check current directory for .gswitch file
-            // Exit code 1 (no output) signals to Starship not to display anything
-            let gswitch_path = std::env::current_dir()
-                .map(|d| d.join(".gswitch"))
-                .unwrap_or_else(|_| std::path::PathBuf::from(".gswitch"));
-
-            if let Ok(content) = std::fs::read_to_string(&gswitch_path) {
-                let profile_name = content.trim();
-                if !profile_name.is_empty() {
-                    print!(" {}", profile_name);
-                    return Ok(());
-                }
+            // Resolve the profile exactly the way `auto` does — searching up to
+            // the repository root — so the prompt never disagrees with the
+            // identity that auto-switching applied (e.g. from a subdirectory).
+            if let Some(profile_name) = dotfile::get_dotfile_profile() {
+                print!(" {}", profile_name);
+                return Ok(());
             }
-            // Exit with error code if no valid profile found
-            // This tells Starship not to display anything (silent, no error message)
+            // No profile: exit non-zero with no output so Starship (and other
+            // prompts) display nothing — silent, with no error message.
             std::process::exit(1);
         }
     }

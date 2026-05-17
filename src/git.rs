@@ -158,21 +158,6 @@ pub fn is_git_repo_in_dir<P: AsRef<Path>>(dir: Option<P>) -> bool {
         .unwrap_or(false)
 }
 
-/// Combined function to check if in git repo and get root - more efficient than separate calls
-pub fn get_git_repo_info<P: AsRef<Path>>(dir: Option<P>) -> Option<std::path::PathBuf> {
-    let mut cmd = Command::new("git");
-    cmd.args(["rev-parse", "--show-toplevel"]);
-    if let Some(d) = dir {
-        cmd.current_dir(d);
-    }
-
-    cmd.output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|root| std::path::PathBuf::from(root.trim()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,26 +174,6 @@ mod tests {
     fn test_is_git_repo_not_in_git_directory() {
         with_temp_dir(|temp_dir| {
             assert!(!is_git_repo_in_dir(Some(temp_dir.path())));
-        });
-    }
-
-    #[test]
-    fn test_get_git_repo_info() {
-        with_git_repo(|repo| {
-            // Create subdirectory
-            let subdir = repo.create_dir("subdir").unwrap();
-
-            // Should find git root from subdirectory
-            let git_root = get_git_repo_info(Some(&subdir)).unwrap();
-            assert_path_eq!(git_root, repo.path());
-        });
-    }
-
-    #[test]
-    fn test_get_git_repo_info_not_in_git_repo() {
-        with_temp_dir(|temp_dir| {
-            // Should return None in non-git directory
-            assert!(get_git_repo_info(Some(temp_dir.path())).is_none());
         });
     }
 

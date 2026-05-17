@@ -1,34 +1,40 @@
-use crate::git;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 const DOTFILE_NAME: &str = ".gswitch";
 
 pub fn find_dotfile_in_dir<P: AsRef<Path>>(start_dir: Option<P>) -> Option<PathBuf> {
-    let current_dir = if let Some(dir) = start_dir {
-        dir.as_ref().to_path_buf()
-    } else {
-        std::env::current_dir().ok()?
+    let mut search_dir = match start_dir {
+        Some(dir) => dir.as_ref().to_path_buf(),
+        None => std::env::current_dir().ok()?,
     };
 
-    // Check if we're in a git repo (also gets git root for boundary checking)
-    let git_root = git::get_git_repo_info(Some(&current_dir))?;
-
-    // Search from current directory up to git root
-    let mut search_dir = current_dir;
+    // Walk upwards looking for a `.gswitch` file, stopping at the repository
+    // root (the directory containing `.git`). A profile only applies within
+    // its own repository, so the search must not cross that boundary; and if
+    // no repository root is found at all, there is no profile to apply.
+    //
+    // This is a pure filesystem walk with no `git` subprocess, which keeps it
+    // cheap enough to run on every shell prompt render via `gsw prompt`.
+    let mut found: Option<PathBuf> = None;
     loop {
-        let dotfile_path = search_dir.join(DOTFILE_NAME);
-        if dotfile_path.exists() {
-            return Some(dotfile_path);
+        if found.is_none() {
+            let dotfile_path = search_dir.join(DOTFILE_NAME);
+            if dotfile_path.exists() {
+                found = Some(dotfile_path);
+            }
         }
 
-        // Stop if we've reached the git root or can't go up further
-        if search_dir == git_root || !search_dir.pop() {
-            break;
+        // `.git` may be a directory (normal repo) or a file (worktree or
+        // submodule); `exists()` covers both.
+        if search_dir.join(".git").exists() {
+            return found;
+        }
+
+        if !search_dir.pop() {
+            return None;
         }
     }
-
-    None
 }
 
 pub fn read_profile_from_dotfile<P: AsRef<Path>>(dotfile_path: P) -> Result<String> {
@@ -86,6 +92,24 @@ mod tests {
             let dotfile_path = find_dotfile_in_dir(Some(&subdir));
             assert!(dotfile_path.is_some());
             assert_path_eq!(dotfile_path.unwrap(), repo.join(".gswitch"));
+        });
+    }
+
+    #[test]
+    fn test_find_dotfile_stops_at_repo_root() {
+        with_temp_dir(|outer| {
+            // A `.gswitch` above the repository must never be picked up.
+            outer.create_file(".gswitch", "outside-profile\n").unwrap();
+
+            let repo_dir = outer.create_dir("repo").unwrap();
+            std::process::Command::new("git")
+                .args(["init"])
+                .current_dir(&repo_dir)
+                .output()
+                .expect("Failed to initialize git repo");
+
+            // Searching from the repo root must not cross into the parent dir.
+            assert!(find_dotfile_in_dir(Some(&repo_dir)).is_none());
         });
     }
 
