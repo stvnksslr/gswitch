@@ -159,7 +159,7 @@ fn test_init_with_invalid_profile() {
 #[test]
 fn test_prompt_with_gswitch_file() {
     let test_env = TestEnv::new();
-    test_env.change_to_temp_dir();
+    test_env.init_git_repo();
     test_env.create_gswitch_file(".gswitch", "test-profile");
 
     let mut cmd = test_env.command();
@@ -170,9 +170,28 @@ fn test_prompt_with_gswitch_file() {
 }
 
 #[test]
+fn test_prompt_from_subdirectory() {
+    // Regression test: `prompt` must search up to the repository root just
+    // like `auto`, so a project's profile shows even from a nested directory.
+    let test_env = TestEnv::new();
+    test_env.init_git_repo();
+    test_env.create_gswitch_file(".gswitch", "root-profile");
+
+    let subdir = test_env.temp_dir.path().join("nested/deep");
+    std::fs::create_dir_all(&subdir).expect("Failed to create nested directory");
+
+    let mut cmd = test_env.command();
+    cmd.current_dir(&subdir);
+    cmd.arg("prompt");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("root-profile"));
+}
+
+#[test]
 fn test_prompt_without_gswitch_file() {
     let test_env = TestEnv::new();
-    test_env.change_to_temp_dir();
+    test_env.init_git_repo();
 
     let mut cmd = test_env.command();
     cmd.arg("prompt");
@@ -184,7 +203,7 @@ fn test_prompt_without_gswitch_file() {
 #[test]
 fn test_prompt_with_empty_gswitch_file() {
     let test_env = TestEnv::new();
-    test_env.change_to_temp_dir();
+    test_env.init_git_repo();
     test_env.create_gswitch_file(".gswitch", "");
 
     let mut cmd = test_env.command();
@@ -197,7 +216,7 @@ fn test_prompt_with_empty_gswitch_file() {
 #[test]
 fn test_prompt_with_whitespace_only_gswitch_file() {
     let test_env = TestEnv::new();
-    test_env.change_to_temp_dir();
+    test_env.init_git_repo();
     test_env.create_gswitch_file(".gswitch", "   \n  \t  ");
 
     let mut cmd = test_env.command();

@@ -45,4 +45,20 @@ impl TestEnv {
         std::env::set_current_dir(self.temp_dir.path())
             .expect("Failed to change to temp directory");
     }
+
+    /// Initialize the temp directory as a git repository. Required for
+    /// commands that resolve `.gswitch` files, since resolution is bounded by
+    /// the enclosing repository root.
+    pub fn init_git_repo(&self) {
+        let output = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(self.temp_dir.path())
+            .output()
+            .expect("Failed to run git init");
+        assert!(
+            output.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

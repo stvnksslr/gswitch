@@ -119,6 +119,30 @@ fn get_git_config_value_in_dir<P: AsRef<Path>>(key: &str, dir: Option<P>) -> Res
     Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
+/// Read a single git config value from the `--local` scope only.
+///
+/// Unlike [`get_current_git_config`], which reads the effective (merged)
+/// config, this looks solely at the repository-local config. Returns `None`
+/// when the key is not set locally. Callers that need to know whether a repo
+/// was explicitly configured (rather than inheriting from `--global`) must use
+/// this.
+pub fn get_local_config_value(key: &str) -> Option<String> {
+    get_local_config_value_in_dir(key, None::<&Path>)
+}
+
+pub fn get_local_config_value_in_dir<P: AsRef<Path>>(key: &str, dir: Option<P>) -> Option<String> {
+    let mut cmd = Command::new("git");
+    cmd.args(["config", "--local", "--get", key]);
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8(output.stdout).ok()?.trim().to_string())
+}
+
 pub fn is_git_repo() -> bool {
     is_git_repo_in_dir(None::<&Path>)
 }
@@ -132,21 +156,6 @@ pub fn is_git_repo_in_dir<P: AsRef<Path>>(dir: Option<P>) -> bool {
     cmd.output()
         .map(|output| output.status.success())
         .unwrap_or(false)
-}
-
-/// Combined function to check if in git repo and get root - more efficient than separate calls
-pub fn get_git_repo_info<P: AsRef<Path>>(dir: Option<P>) -> Option<std::path::PathBuf> {
-    let mut cmd = Command::new("git");
-    cmd.args(["rev-parse", "--show-toplevel"]);
-    if let Some(d) = dir {
-        cmd.current_dir(d);
-    }
-
-    cmd.output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|root| std::path::PathBuf::from(root.trim()))
 }
 
 #[cfg(test)]
@@ -165,26 +174,6 @@ mod tests {
     fn test_is_git_repo_not_in_git_directory() {
         with_temp_dir(|temp_dir| {
             assert!(!is_git_repo_in_dir(Some(temp_dir.path())));
-        });
-    }
-
-    #[test]
-    fn test_get_git_repo_info() {
-        with_git_repo(|repo| {
-            // Create subdirectory
-            let subdir = repo.create_dir("subdir").unwrap();
-
-            // Should find git root from subdirectory
-            let git_root = get_git_repo_info(Some(&subdir)).unwrap();
-            assert_path_eq!(git_root, repo.path());
-        });
-    }
-
-    #[test]
-    fn test_get_git_repo_info_not_in_git_repo() {
-        with_temp_dir(|temp_dir| {
-            // Should return None in non-git directory
-            assert!(get_git_repo_info(Some(temp_dir.path())).is_none());
         });
     }
 
@@ -253,7 +242,9 @@ mod tests {
             set_git_config_in_dir(&unsigned, false, Some(repo.path())).unwrap();
 
             assert_eq!(
-                get_current_git_config_in_dir(Some(repo.path())).unwrap().name,
+                get_current_git_config_in_dir(Some(repo.path()))
+                    .unwrap()
+                    .name,
                 "Unsigned User"
             );
 
@@ -273,6 +264,38 @@ mod tests {
             assert!(
                 !local_value("gpg.format").status.success(),
                 "local gpg.format should have been unset"
+            );
+        });
+    }
+
+    #[test]
+    fn test_get_local_config_value_reads_only_local_scope() {
+        with_git_repo(|repo| {
+            let profile = GitProfile {
+                name: "Local Only".to_string(),
+                email: "local@example.com".to_string(),
+                signing_key: Some("KEY1".to_string()),
+                gpg_format: None,
+            };
+            set_git_config_in_dir(&profile, false, Some(repo.path())).unwrap();
+
+            assert_eq!(
+                get_local_config_value_in_dir("user.name", Some(repo.path())),
+                Some("Local Only".to_string())
+            );
+            assert_eq!(
+                get_local_config_value_in_dir("user.signingkey", Some(repo.path())),
+                Some("KEY1".to_string())
+            );
+            // gpg.format was not set, so the local scope has no value.
+            assert_eq!(
+                get_local_config_value_in_dir("gpg.format", Some(repo.path())),
+                None
+            );
+            // A key that is never set anywhere is also None.
+            assert_eq!(
+                get_local_config_value_in_dir("nonexistent.key", Some(repo.path())),
+                None
             );
         });
     }

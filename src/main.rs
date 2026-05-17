@@ -198,23 +198,34 @@ fn main() -> Result<()> {
                 return Ok(()); // Silent exit when not in git repo
             }
 
-            // Check if we have the profile in config
+            // Check if we have the profile in config. Print to stdout (not
+            // stderr): shell integration runs `gsw auto 2>/dev/null`, so a
+            // stderr error would be swallowed and the user could commit under
+            // the wrong identity with no warning at all.
             let Some(profile) = config.get_profile(&profile_name) else {
-                bail!(
-                    "Profile '{}' specified in .gswitch file not found",
+                println!(
+                    "gswitch: profile '{}' from .gswitch is not configured; git identity left unchanged",
                     profile_name
                 );
+                return Ok(());
             };
 
-            // Check if we're already using the correct profile locally
-            if let Ok(current_profile) = git::get_current_git_config()
-                && current_profile.email == profile.email
-                && current_profile.name == profile.name
-            {
+            // Skip the write only if the *local* git identity already matches
+            // the full profile. Reading the local scope (not the effective
+            // config) ensures a matching global identity does not prevent the
+            // per-repo config from being written; comparing the signing key
+            // and gpg format avoids leaving a stale or missing key behind.
+            let local_matches = git::get_local_config_value("user.name").as_deref()
+                == Some(profile.name.as_str())
+                && git::get_local_config_value("user.email").as_deref()
+                    == Some(profile.email.as_str())
+                && git::get_local_config_value("user.signingkey") == profile.signing_key
+                && git::get_local_config_value("gpg.format") == profile.gpg_format;
+
+            if local_matches {
                 return Ok(()); // Already using correct profile, no need to switch
             }
 
-            // Only set git config if we actually need to change it
             git::set_git_config(profile, false)?;
         }
 
@@ -334,21 +345,15 @@ _gsw_auto_switch"#
         }
 
         Commands::Prompt => {
-            // Fast path for shell prompts: only check current directory for .gswitch file
-            // Exit code 1 (no output) signals to Starship not to display anything
-            let gswitch_path = std::env::current_dir()
-                .map(|d| d.join(".gswitch"))
-                .unwrap_or_else(|_| std::path::PathBuf::from(".gswitch"));
-
-            if let Ok(content) = std::fs::read_to_string(&gswitch_path) {
-                let profile_name = content.trim();
-                if !profile_name.is_empty() {
-                    print!(" {}", profile_name);
-                    return Ok(());
-                }
+            // Resolve the profile exactly the way `auto` does — searching up to
+            // the repository root — so the prompt never disagrees with the
+            // identity that auto-switching applied (e.g. from a subdirectory).
+            if let Some(profile_name) = dotfile::get_dotfile_profile() {
+                print!(" {}", profile_name);
+                return Ok(());
             }
-            // Exit with error code if no valid profile found
-            // This tells Starship not to display anything (silent, no error message)
+            // No profile: exit non-zero with no output so Starship (and other
+            // prompts) display nothing — silent, with no error message.
             std::process::exit(1);
         }
     }
