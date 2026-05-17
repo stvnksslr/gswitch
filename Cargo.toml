@@ -2,6 +2,10 @@
 name = "gswitch"
 version = "0.1.0"
 edition = "2024"
+description = "A fast, lightweight CLI tool for managing and automatically switching git profiles based on project context."
+license = "MIT"
+repository = "https://github.com/stvnksslr/gswitch"
+readme = "README.md"
 
 [[bin]]
 name = "gsw"

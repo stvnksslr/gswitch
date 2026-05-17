@@ -60,7 +60,7 @@ A fast, lightweight CLI tool for managing and automatically switching git profil
 
 | Command | Description |
 |---------|-------------|
-| `gsw add <name> --user-name "Name" --email "email@example.com" [--signing-key "key"]` | Add a new profile |
+| `gsw add <name> --user-name "Name" --email "email@example.com" [--signing-key "key"] [--gpg-format <gpg\|ssh\|x509>]` | Add a new profile |
 | `gsw import <name>` | Import current git identity as a profile |
 | `gsw list` | List all profiles |
 | `gsw switch <name>` | Switch to profile globally |
@@ -110,11 +110,16 @@ Display the active git profile in your [Starship](https://starship.rs/) prompt b
 ```toml
 [custom.gsw]
 command = "gsw prompt"
-detect_files = [".gswitch"]
+when = "gsw prompt"
 format = "[$output]($style)"
 style = "bold blue"
 description = "Show project git profile"
 ```
+
+`gsw prompt` searches up to the repository root, so the profile is shown even
+from a subdirectory, and exits non-zero with no output when there is no
+`.gswitch` file. Using it as the `when` condition lets Starship display the
+module only when a profile applies.
 
 ### Alternative: Show current git identity name
 ```bash
@@ -134,7 +139,7 @@ description = "Show active git identity"
 ☸ <orbstack> gswitch on  main [!?] is 📦 v0.1.0 via 🦀 v1.89.0  youremail@email.com
 ```
 
-```
+```toml
 [custom.gsw]
 command = "gsw current --format=email 2>/dev/null || echo ''"
 detect_files = [".gswitch"]
@@ -171,3 +176,7 @@ cd ~/personal/project
 gsw init personal
 # This project will automatically use the personal profile
 ```
+
+## License
+
+Licensed under the [MIT License](LICENSE).
